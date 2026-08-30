@@ -59,6 +59,8 @@ jobs:
 
 
       - name: Configure Secrets
+        env:
+          GOOGLE_SERVICES_JSON_VALUE: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           if [ -z "${{ secrets.API_ID }}" ] || [ -z "${{ secrets.API_HASH }}" ]; then
             echo "::error::Add API_ID and API_HASH as GitHub Actions repository secrets before building."
@@ -76,7 +78,11 @@ jobs:
           echo "sentryDsn=${{ secrets.SENTRY_DSN }}" >> local.properties
           echo "mapsApiKey=${{ secrets.MAPS_API_KEY }}" >> local.properties
 
-          echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 --decode > TMessagesProj_App/google-services.json
+          case "$GOOGLE_SERVICES_JSON_VALUE" in
+            \{*) printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" > TMessagesProj_App/google-services.json ;;
+            *) printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" | tr -d '[:space:]' | base64 --decode > TMessagesProj_App/google-services.json ;;
+          esac
+          python3 -m json.tool TMessagesProj_App/google-services.json >/dev/null
           if [ -n "${{ secrets.SENTRY_PROPERTIES }}" ]; then
             echo "${{ secrets.SENTRY_PROPERTIES }}" | base64 --decode > sentry.properties
           fi
