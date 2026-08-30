@@ -80,7 +80,7 @@ jobs:
 
           case "$GOOGLE_SERVICES_JSON_VALUE" in
             \{*) printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" > TMessagesProj_App/google-services.json ;;
-            *) printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" | tr -d '[:space:]' | base64 --decode > TMessagesProj_App/google-services.json ;;
+            *) printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" | tr -cd 'A-Za-z0-9+/=' | base64 --decode > TMessagesProj_App/google-services.json ;;
           esac
           python3 -m json.tool TMessagesProj_App/google-services.json >/dev/null
           if [ -n "${{ secrets.SENTRY_PROPERTIES }}" ]; then
