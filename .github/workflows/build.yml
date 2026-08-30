@@ -78,10 +78,11 @@ jobs:
           echo "sentryDsn=${{ secrets.SENTRY_DSN }}" >> local.properties
           echo "mapsApiKey=${{ secrets.MAPS_API_KEY }}" >> local.properties
 
-          case "$GOOGLE_SERVICES_JSON_VALUE" in
-            \{*) printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" > TMessagesProj_App/google-services.json ;;
-            *) printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" | tr -cd 'A-Za-z0-9+/=' | base64 --decode > TMessagesProj_App/google-services.json ;;
-          esac
+          if printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" | python3 -m json.tool >/dev/null 2>&1; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" > TMessagesProj_App/google-services.json
+          else
+            printf '%s' "$GOOGLE_SERVICES_JSON_VALUE" | tr -cd 'A-Za-z0-9+/=' | base64 --decode > TMessagesProj_App/google-services.json
+          fi
           python3 -m json.tool TMessagesProj_App/google-services.json >/dev/null
           if [ -n "${{ secrets.SENTRY_PROPERTIES }}" ]; then
             echo "${{ secrets.SENTRY_PROPERTIES }}" | base64 --decode > sentry.properties
