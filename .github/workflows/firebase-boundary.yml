@@ -1,0 +1,126 @@
+name: Firebase Boundary
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev, ci]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-fcm-only:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enforce Firebase configuration boundary
+        env:
+          GOOGLE_SERVICES_JSON_VALUE: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          root = pathlib.Path(".")
+          errors = []
+          notices = []
+
+          tracked = subprocess.check_output(
+              ["git", "ls-files"], text=True
+          ).splitlines()
+          tracked_configs = [
+              path for path in tracked
+              if pathlib.PurePosixPath(path).name == "google-services.json"
+          ]
+          if tracked_configs:
+              errors.append("google-services.json must never be tracked by Git.")
+
+          ignore_text = (root / ".gitignore").read_text(encoding="utf-8")
+          if not any(
+              line.strip() in {"google-services.json", "**/google-services.json"}
+              for line in ignore_text.splitlines()
+          ):
+              errors.append(".gitignore must ignore google-services.json.")
+
+          properties = (root / "gradle.properties").read_text(encoding="utf-8")
+          match = re.search(r"(?m)^APP_PACKAGE\s*=\s*([^\s#]+)", properties)
+          app_package = match.group(1) if match else None
+          if not app_package:
+              errors.append("APP_PACKAGE is missing from gradle.properties.")
+
+          allowed_firebase = {"firebase-messaging"}
+          found_firebase = set()
+          dependency_pattern = re.compile(
+              r"com\.google\.firebase:([A-Za-z0-9_.-]+)"
+          )
+          for gradle_file in root.rglob("*.gradle"):
+              text = gradle_file.read_text(encoding="utf-8", errors="replace")
+              found_firebase.update(dependency_pattern.findall(text))
+
+          disallowed = sorted(found_firebase - allowed_firebase)
+          if "firebase-messaging" not in found_firebase:
+              errors.append("FCM boundary requires firebase-messaging.")
+          if disallowed:
+              errors.append(
+                  "Only FCM is authorized; remove other Firebase modules: "
+                  + ", ".join(disallowed)
+              )
+
+          app_gradle = (root / "TMessagesProj_App" / "build.gradle").read_text(
+              encoding="utf-8"
+          )
+          if "com.google.gms.google-services" not in app_gradle:
+              errors.append("Google Services plugin is not applied to the app module.")
+
+          raw = os.environ.get("GOOGLE_SERVICES_JSON_VALUE", "").strip()
+          if raw:
+              try:
+                  try:
+                      config = json.loads(raw)
+                  except json.JSONDecodeError:
+                      compact = re.sub(r"\s+", "", raw)
+                      config = json.loads(base64.b64decode(compact, validate=True))
+                  packages = {
+                      item.get("client_info", {})
+                          .get("android_client_info", {})
+                          .get("package_name")
+                      for item in config.get("client", [])
+                  }
+                  packages.discard(None)
+                  if app_package not in packages:
+                      errors.append(
+                          "Firebase Android client does not match APP_PACKAGE."
+                      )
+              except Exception:
+                  errors.append(
+                      "GOOGLE_SERVICES_JSON is neither valid JSON nor valid base64 JSON."
+                  )
+          else:
+              notices.append(
+                  "GOOGLE_SERVICES_JSON unavailable; package/client match was not checked."
+              )
+
+          if "io.sentry" in (
+              (root / "build.gradle").read_text(encoding="utf-8")
+              + (root / "TMessagesProj" / "build.gradle").read_text(encoding="utf-8")
+          ):
+              notices.append(
+                  "Sentry telemetry is present and remains outside this Firebase-only boundary."
+              )
+
+          for notice in notices:
+              print(f"::notice::{notice}")
+          for error in errors:
+              print(f"::error::{error}")
+          if errors:
+              sys.exit(1)
+          print("Firebase boundary verified: FCM only; no tracked client config.")
+          PY
